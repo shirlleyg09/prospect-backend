@@ -57,10 +57,11 @@ async function bootstrap(): Promise<void> {
   await prisma.enableShutdownHooks(app);
 
   const port = config.get<number>('PORT', 3001);
-  await app.listen(port);
-
   // eslint-disable-next-line no-console
-  console.log(`🚀 Prospect API rodando em http://localhost:${port}/api/v1`);
+  console.log(`[bootstrap] Tentando escutar na porta ${port}...`);
+  await app.listen(port, '0.0.0.0');
+  // eslint-disable-next-line no-console
+  console.log(`🚀 Prospect API rodando em http://0.0.0.0:${port}/api/v1`);
 }
 
 bootstrap();
