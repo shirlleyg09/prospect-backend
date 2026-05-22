@@ -26,42 +26,63 @@ process.on('unhandledRejection', (reason) => {
 });
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, {
-    logger: ['error', 'warn', 'log', 'debug'],
-  });
-
-  const config = app.get(ConfigService);
-
-  // Segurança
-  app.use(helmet());
-  app.enableCors({
-    origin: config.get<string>('CORS_ORIGIN', 'http://localhost:3000'),
-    credentials: true,
-  });
-
-  // Validação global de DTOs
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: { enableImplicitConversion: true },
-    }),
-  );
-
-  // Prefixo de API
-  app.setGlobalPrefix('api/v1');
-
-  // Shutdown hooks do Prisma
-  const prisma = app.get(PrismaService);
-  await prisma.enableShutdownHooks(app);
-
-  const port = config.get<number>('PORT', 3001);
   // eslint-disable-next-line no-console
-  console.log(`[bootstrap] Tentando escutar na porta ${port}...`);
-  await app.listen(port, '0.0.0.0');
-  // eslint-disable-next-line no-console
-  console.log(`🚀 Prospect API rodando em http://0.0.0.0:${port}/api/v1`);
+  console.log('[bootstrap] Passo 1: iniciando NestFactory.create...');
+
+  // Timeout global: se o app não subir em 120s, reinicia
+  const startupTimeout = setTimeout(() => {
+    // eslint-disable-next-line no-console
+    console.error('[bootstrap] STARTUP TIMEOUT (120s) — reiniciando processo');
+    process.exit(1);
+  }, 120_000);
+
+  try {
+    const app = await NestFactory.create(AppModule, {
+      logger: ['error', 'warn', 'log', 'debug'],
+    });
+    // eslint-disable-next-line no-console
+    console.log('[bootstrap] Passo 2: NestFactory.create OK');
+
+    const config = app.get(ConfigService);
+
+    // Segurança
+    app.use(helmet());
+    app.enableCors({
+      origin: config.get<string>('CORS_ORIGIN', 'http://localhost:3000'),
+      credentials: true,
+    });
+
+    // Validação global de DTOs
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+        transformOptions: { enableImplicitConversion: true },
+      }),
+    );
+
+    // Prefixo de API
+    app.setGlobalPrefix('api/v1');
+
+    // Shutdown hooks do Prisma
+    const prisma = app.get(PrismaService);
+    await prisma.enableShutdownHooks(app);
+
+    const port = config.get<number>('PORT', 3001);
+    // eslint-disable-next-line no-console
+    console.log(`[bootstrap] Passo 3: tentando escutar na porta ${port}...`);
+
+    await app.listen(port, '0.0.0.0');
+    clearTimeout(startupTimeout);
+    // eslint-disable-next-line no-console
+    console.log(`[bootstrap] Passo 4: 🚀 Prospect API rodando em http://0.0.0.0:${port}/api/v1`);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[bootstrap] FALHA FATAL no startup:', err);
+    clearTimeout(startupTimeout);
+    process.exit(1);
+  }
 }
 
 bootstrap();
