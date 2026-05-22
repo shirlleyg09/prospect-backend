@@ -2,7 +2,14 @@ FROM node:20-slim
 
 WORKDIR /app
 
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+# Dependências de sistema: OpenSSL (Prisma) + Chromium (Puppeteer PDF)
+RUN apt-get update -y && \
+    apt-get install -y openssl chromium fonts-liberation libgbm1 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Pula o download do Chromium do puppeteer — usa o do sistema
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 COPY package*.json ./
 RUN npm ci
