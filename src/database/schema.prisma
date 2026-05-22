@@ -1,0 +1,1222 @@
+// =============================================================================
+// PROSPECT — Schema Prisma
+// Modelagem centralizada, multi-tenant por teamId, extensível por JSON metadata.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum SearchStatus {
+  PENDING
+  PROCESSING
+  DONE
+  ERROR
+}
+
+enum LeadTemperature {
+  COLD
+  WARM
+  HOT
+}
+
+enum InteractionChannel {
+  WHATSAPP
+  EMAIL
+  INSTAGRAM
+  PHONE
+  MEETING
+  OTHER
+}
+
+enum InteractionDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum PipelineStageKind {
+  NEW
+  CONTACTED
+  NEGOTIATING
+  WON
+  LOST
+}
+
+enum ProviderKind {
+  APIFY
+  SERPAPI
+  GOOGLE_PLACES
+  CUSTOM
+}
+
+enum ProposalStatus {
+  RASCUNHO
+  ENVIADA
+  VISUALIZADA
+  EM_NEGOCIACAO
+  APROVADA
+  REJEITADA
+  EXPIRADA
+}
+
+enum ProposalTemplateCategory {
+  DESIGN
+  WEB_DEV
+  CUSTOM
+}
+
+// -----------------------------------------------------------------------------
+// IDENTITY & TENANCY
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  avatarUrl     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  memberships   Membership[]
+  interactions  Interaction[]
+  assignedLeads Lead[]        @relation("AssignedLeads")
+  searches      Search[]
+  proposals     Proposal[]    @relation("ProposalCreatedBy")
+  proposalRefinements ProposalRefinement[]
+  proposalEvents ProposalEvent[]
+  leadEvents    LeadEvent[]
+  notifications Notification[]
+  contracts     Contract[]    @relation("ContractCreatedBy")
+  contractEvents ContractEvent[]
+  contractVersions ContractVersion[]
+
+  @@index([email])
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  plan        String   @default("free")
+  leadsQuota  Int      @default(100)
+  proposalsQuota Int   @default(5)   // quantas propostas podem ser criadas por mês no plano atual
+  aiContractsQuota Int @default(3)   // quantos contratos via IA por mês
+  aiContractsUsed  Int @default(0)   // contador (resetar mensalmente — futuro)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships     Membership[]
+  leads           Lead[]
+  searches        Search[]
+  pipelineStages  PipelineStage[]
+  messageTemplates MessageTemplate[]
+  providerConfigs ProviderConfig[]
+  proposals       Proposal[]
+  proposalTemplates ProposalTemplate[]
+  proposalUsages  ProposalUsage[]
+  revenues        Revenue[]
+  receivables     AccountsReceivable[]
+  payables        AccountsPayable[]
+  notifications   Notification[]
+  contracts       Contract[]
+  contractTemplates ContractTemplate[]
+  contractClauses ContractClause[]
+
+  subscriptions   Subscription[]
+  usageCounters   UsageCounter[]
+  featureFlags    FeatureFlag[]
+  supportTickets  SupportTicket[]
+
+  @@index([slug])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  teamId    String
+  role      Role     @default(MEMBER)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@index([teamId])
+}
+
+// -----------------------------------------------------------------------------
+// PROVIDERS
+// -----------------------------------------------------------------------------
+
+model ProviderConfig {
+  id         String       @id @default(cuid())
+  teamId     String
+  kind       ProviderKind
+  name       String
+  enabled    Boolean      @default(true)
+  priority   Int          @default(100)
+  // Credenciais cifradas (KMS-wrap)
+  secrets    Json
+  // Config livre (actor id, params padrão, etc)
+  config     Json         @default("{}")
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  team       Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  runs       ProviderRun[]
+
+  @@unique([teamId, kind, name])
+  @@index([teamId, enabled])
+}
+
+model ProviderRun {
+  id               String   @id @default(cuid())
+  providerConfigId String
+  searchId         String?
+  startedAt        DateTime @default(now())
+  finishedAt       DateTime?
+  status           String   // running, success, error
+  resultsCount     Int      @default(0)
+  errorMessage     String?
+  rawMeta          Json?
+
+  providerConfig ProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Cascade)
+  search         Search?        @relation(fields: [searchId], references: [id], onDelete: SetNull)
+
+  @@index([searchId])
+  @@index([providerConfigId, startedAt])
+}
+
+// -----------------------------------------------------------------------------
+// SEARCHES & LEADS
+// -----------------------------------------------------------------------------
+
+model Search {
+  id          String       @id @default(cuid())
+  teamId      String
+  createdById String
+  name        String
+  niche       String
+  location    String
+  // Filtros livres: {minRating, hasWebsite, hasInstagram, ...}
+  filters     Json         @default("{}")
+  providers   String[]     // lista de kinds / names a usar
+  status      SearchStatus @default(PENDING)
+  totalFound  Int          @default(0)
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  errorMessage String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  team        Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy   User          @relation(fields: [createdById], references: [id])
+  leads       Lead[]
+  providerRuns ProviderRun[]
+
+  @@index([teamId, status])
+  @@index([createdAt])
+}
+
+model Lead {
+  id              String          @id @default(cuid())
+  teamId          String
+  searchId        String?
+  assignedToId    String?
+
+  // Dados de identificação
+  name            String
+  legalName       String?
+  cnpj            String?
+  phone           String?
+  whatsapp        String?
+  email           String?
+  website         String?
+  instagram       String?
+  facebook        String?
+
+  // Endereço / Geolocalização
+  address         String?
+  city            String?
+  state           String?
+  country         String?          @default("BR")
+  zipCode         String?
+  latitude        Float?
+  longitude       Float?
+
+  // Dados de negócio
+  niche           String?
+  description     String?
+  // Notas manuais do usuário sobre o lead (markdown leve)
+  // Diferente de `description` que vem do provider — `notes` é editável.
+  notes           String?
+  googleRating    Float?
+  googleReviews   Int?
+  instagramFollowers Int?
+  instagramPosts  Int?
+  yearsActive     Int?
+
+  // Scores de IA
+  leadScore       Int?             // 0-100
+  opportunityScore Int?            // 0-100
+  temperature     LeadTemperature?
+  estimatedTicket Decimal?         @db.Decimal(12, 2)
+  priorityRank    Int?             // 1 = top priority
+
+  // Insights e análise
+  insights        Json?            // array de problemas detectados
+  valueReason     String?          // texto: "por que vale a pena"
+  aiAnalyzedAt    DateTime?
+
+  // Raio-X (dados brutos por canal)
+  rawProfile      Json?            // { instagram: {...}, google: {...}, site: {...} }
+
+  // Pipeline
+  pipelineStageId String?
+  pipelinePosition Int             @default(0)
+
+  // Origem
+  sourceKind      String?          // qual provider originou
+  externalIds     Json?            // ids em diferentes providers para dedup
+
+  // Tags livres
+  tags            String[]         @default([])
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  team          Team           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  search        Search?        @relation(fields: [searchId], references: [id], onDelete: SetNull)
+  assignedTo    User?          @relation("AssignedLeads", fields: [assignedToId], references: [id])
+  pipelineStage PipelineStage? @relation(fields: [pipelineStageId], references: [id])
+  interactions  Interaction[]
+  messages      Message[]
+  proposals     Proposal[]
+  revenues      Revenue[]
+  events        LeadEvent[]
+  contracts     Contract[]
+
+  // Cache do status da proposta mais recente (pra queries rápidas no Kanban/lista)
+  // Atualizado pelo ProposalService quando proposta muda de estado.
+  lastProposalStatus ProposalStatus?
+  lastProposalAt     DateTime?
+
+  @@index([teamId, temperature])
+  @@index([teamId, leadScore])
+  @@index([teamId, pipelineStageId])
+  @@index([searchId])
+  @@index([cnpj])
+  @@index([email])
+  @@index([phone])
+  @@unique([teamId, cnpj])
+}
+
+// -----------------------------------------------------------------------------
+// CRM
+// -----------------------------------------------------------------------------
+
+model PipelineStage {
+  id        String            @id @default(cuid())
+  teamId    String
+  kind      PipelineStageKind
+  name      String
+  order     Int
+  color     String?
+  createdAt DateTime          @default(now())
+
+  team  Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  leads Lead[]
+
+  @@unique([teamId, kind])
+  @@index([teamId, order])
+}
+
+model Interaction {
+  id          String               @id @default(cuid())
+  leadId      String
+  userId      String
+  channel     InteractionChannel
+  direction   InteractionDirection
+  content     String
+  outcome     String?              // ex: "no-answer", "scheduled", "not-interested"
+  occurredAt  DateTime             @default(now())
+  createdAt   DateTime             @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([leadId, occurredAt])
+}
+
+// -----------------------------------------------------------------------------
+// MESSAGING / TEMPLATES
+// -----------------------------------------------------------------------------
+
+enum MessageTemplateCategory {
+  PRIMEIRO_CONTATO
+  FOLLOW_UP
+  QUEBRA_OBJECAO
+  AGENDAMENTO
+  RETOMADA
+  CUSTOM
+}
+
+model MessageTemplate {
+  id        String             @id @default(cuid())
+  teamId    String?            // null = template global (seed do sistema)
+  name      String
+  channel   InteractionChannel
+  category  MessageTemplateCategory @default(CUSTOM)
+  description String?
+  // Corpo com placeholders: {{lead.name}}, {{insights[0]}}.
+  // Para templates IA-driven, body fica vazio e usa-se aiPrompt.
+  body      String              @default("")
+  variables Json                @default("[]")
+  // Quando preenchido, indica que esse template gera via IA (não placeholder).
+  // Contém instruções extras para a IA além do system prompt base.
+  aiPrompt  String?
+  isActive  Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  team     Team?     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([teamId, channel])
+  @@index([category])
+}
+
+model Message {
+  id         String             @id @default(cuid())
+  leadId     String
+  templateId String?
+  channel    InteractionChannel
+  body       String
+  // Metadados de geração (modelo usado, tokens, etc)
+  aiMeta     Json?
+  createdAt  DateTime           @default(now())
+
+  lead     Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  template MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt])
+}
+
+// -----------------------------------------------------------------------------
+// PROPOSTAS COMERCIAIS (HTML + IA)
+// -----------------------------------------------------------------------------
+//
+// Um sistema interno. O cliente NÃO acessa o Prospect — só recebe um link público
+// (/p/:slug) que mostra uma página HTML estática gerada pelo sistema.
+//
+// Fluxo:
+//   1. Usuário escolhe um template (seed por team ou custom)
+//   2. IA gera o conteúdo inicial baseado no lead + template
+//   3. Usuário refina via chat lateral (gera ProposalRefinement)
+//   4. Publica → gera publicSlug único
+//   5. Compartilha link → cliente abre → registra ProposalView
+//   6. Usuário marca como aprovada/rejeitada manualmente
+//
+// Condições de pagamento são INFORMATIVAS (sem gateway / sem botão de pagar).
+// -----------------------------------------------------------------------------
+
+model ProposalTemplate {
+  id          String                   @id @default(cuid())
+  teamId      String?                  // null = template global (seed)
+  name        String
+  category    ProposalTemplateCategory
+  description String?
+  isActive    Boolean                  @default(true)
+
+  // Estrutura: array de seções do HTML ["hero", "diagnostico", "solucao", ...]
+  outline     Json
+
+  // Faixas sugeridas de preço pra IA usar como guia (não obrigatório)
+  // Ex: { "basic": [500, 1500], "intermediate": [1500, 4000], "premium": [4000, 12000] }
+  defaultPricing Json?
+
+  // Prompt específico desse template (anexado ao system prompt base).
+  // Ex: "Foque em entregáveis visuais. Sempre inclua mock-ups no escopo."
+  aiPrompt    String?
+
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+
+  team        Team?                    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  proposals   Proposal[]
+
+  @@index([teamId, isActive])
+  @@index([category])
+}
+
+model Proposal {
+  id           String         @id @default(cuid())
+  teamId       String
+  leadId       String
+  templateId   String?
+  createdById  String
+
+  title        String
+  status       ProposalStatus @default(RASCUNHO)
+
+  // Conteúdo estruturado — array de seções com tipo e dados.
+  // Ex: [{kind: 'hero', headline: '...', subheadline: '...'}, {kind: 'diagnostico', points: [...]}, ...]
+  content      Json
+
+  // Planos tier (sempre 3 slots: basic, intermediate, premium)
+  // Ex: [{tier: 'BASIC', name: 'Essencial', price: 2500, features: [...], highlighted: false}, ...]
+  plans        Json
+
+  // Condições de pagamento informativas (sem gateway)
+  // Ex: { methods: ['PIX', 'CARD', 'TRANSFER'], terms: '50% entrada, 50% entrega', discountCash: 10 }
+  paymentConditions Json?
+
+  // Publicação
+  publicSlug   String?        @unique  // null enquanto RASCUNHO
+  publishedAt  DateTime?
+  expiresAt    DateTime?
+
+  // Tracking agregado (calculado dos ProposalView)
+  viewCount            Int       @default(0)
+  lastViewedAt         DateTime?
+  totalReadingTimeSec  Int       @default(0)
+
+  // Estado final
+  approvedAt   DateTime?
+  rejectedAt   DateTime?
+  rejectionReason String?
+
+  // Metadados livres (tom, briefing extra, idioma, etc)
+  metadata     Json?
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  team         Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  lead         Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  template     ProposalTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  createdBy    User             @relation("ProposalCreatedBy", fields: [createdById], references: [id])
+  views        ProposalView[]
+  refinements  ProposalRefinement[]
+  revenues     Revenue[]
+  events       ProposalEvent[]
+  contracts    Contract[]
+
+  @@index([teamId, status])
+  @@index([leadId])
+  @@index([publicSlug])
+  @@index([teamId, createdAt])
+}
+
+model ProposalView {
+  id              String   @id @default(cuid())
+  proposalId      String
+  viewedAt        DateTime @default(now())
+
+  // Pra dedup sem guardar IP cru (LGPD): hash SHA-256 salt do team
+  ipHash          String?
+  userAgent       String?
+  referer         String?
+
+  // Calculado via heartbeat/beacon no frontend público
+  readingTimeSec  Int      @default(0)
+  scrollDepthPct  Int      @default(0)  // 0-100
+
+  // IDs de dispositivo pra não duplicar views do mesmo navegador
+  sessionId       String?
+
+  proposal        Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId, viewedAt])
+  @@index([sessionId])
+}
+
+model ProposalRefinement {
+  id          String   @id @default(cuid())
+  proposalId  String
+  userId      String
+
+  // Prompt que o usuário enviou (ex: "reduzir 20%")
+  prompt      String
+
+  // Snapshot ANTES do refinamento (pra rollback se quiser)
+  snapshotBefore Json?
+
+  // Info do retorno (tokens usados, model, etc)
+  aiMeta      Json?
+
+  // Sucesso ou erro
+  success     Boolean  @default(true)
+  errorMessage String?
+
+  createdAt   DateTime @default(now())
+
+  proposal    Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([proposalId, createdAt])
+}
+
+// Contador mensal de uso (quota de propostas criadas no mês).
+// Uma linha por team por mês. Usada pra enforcement do limite do plano.
+model ProposalUsage {
+  id          String   @id @default(cuid())
+  teamId      String
+  year        Int
+  month       Int      // 1-12
+
+  // Quantas propostas foram criadas nesse mês
+  createdCount Int     @default(0)
+  // Quantos refinamentos com IA foram feitos (pode ter quota separada no futuro)
+  refinementCount Int  @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, year, month])
+  @@index([teamId])
+}
+
+// =============================================================================
+// FINANCEIRO
+// =============================================================================
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+//
+// Revenue — registro de receita vinculado a uma proposta aprovada.
+// Criado automaticamente quando proposta muda pra APPROVED.
+// Pode também ser criado manualmente (ex: serviço avulso).
+//
+model Revenue {
+  id          String   @id @default(cuid())
+  teamId      String
+  proposalId  String?  // null quando criado manualmente
+  leadId      String?  // referência direta ao lead (facilita queries)
+  
+  description String           // "Proposta para Escola X — Plano Profissional"
+  amount      Float             // valor total em reais
+  planTier    String?           // BASIC / INTERMEDIATE / PREMIUM
+  status      PaymentStatus @default(PENDING)
+  
+  // Datas
+  closedAt    DateTime?         // quando o deal foi fechado (aprovação)
+  dueDate     DateTime?         // vencimento geral
+  paidAt      DateTime?         // quando foi pago integralmente
+  
+  notes       String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  proposal    Proposal? @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  lead        Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  receivables AccountsReceivable[]
+
+  @@index([teamId, status])
+  @@index([teamId, closedAt])
+  @@index([proposalId])
+}
+
+//
+// AccountsReceivable — parcelas a receber de uma receita.
+// Ex: proposta de R$ 3.000 parcelada em 3x de R$ 1.000.
+//
+model AccountsReceivable {
+  id          String   @id @default(cuid())
+  teamId      String
+  revenueId   String
+  
+  description String          // "Parcela 1/3 — Escola X"
+  amount      Float
+  installment Int    @default(1)  // número da parcela (1, 2, 3...)
+  totalInstallments Int @default(1)
+  
+  status      PaymentStatus @default(PENDING)
+  dueDate     DateTime
+  paidAt      DateTime?
+  paymentMethod String?       // PIX, Boleto, Cartão, etc
+  
+  notes       String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  revenue     Revenue  @relation(fields: [revenueId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, status])
+  @@index([teamId, dueDate])
+  @@index([revenueId])
+}
+
+//
+// AccountsPayable — contas a pagar (custos, despesas operacionais).
+// Criado manualmente pelo usuário.
+//
+model AccountsPayable {
+  id          String   @id @default(cuid())
+  teamId      String
+  
+  description String           // "Hosting DigitalOcean — Abril"
+  category    String?          // Infra, Marketing, Pessoal, Impostos, Outros
+  amount      Float
+  
+  status      PaymentStatus @default(PENDING)
+  dueDate     DateTime
+  paidAt      DateTime?
+  paymentMethod String?
+  
+  notes       String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, status])
+  @@index([teamId, dueDate])
+}
+
+// Eventos de auditoria/histórico de uma proposta.
+// Registra cada mudança importante: criação, edição, publicação,
+// aprovação, rejeição, desfazer, etc.
+// Aparece na UI como timeline pra histórico de cada proposta.
+model ProposalEvent {
+  id          String   @id @default(cuid())
+  proposalId  String
+  userId      String?
+
+  // Tipo do evento
+  // CREATED | UPDATED | PUBLISHED | APPROVED | REJECTED |
+  // APPROVAL_UNDONE | REJECTION_UNDONE | VIEWED | REFINED
+  kind        String
+
+  // Dados extras do evento (ex: plano aprovado, motivo da rejeição)
+  metadata    Json?
+
+  // Texto descritivo opcional
+  description String?
+
+  createdAt   DateTime @default(now())
+
+  proposal    Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([proposalId, createdAt])
+}
+
+// Notificações em-app (sino do topo).
+// Geradas por eventos importantes: proposta visualizada, prestes a expirar,
+// parcela vencendo, etc.
+model Notification {
+  id          String   @id @default(cuid())
+  teamId      String
+  userId      String?  // se null = notificação do team inteiro
+
+  kind        String   // PROPOSAL_VIEWED | PROPOSAL_REVISITED | PROPOSAL_EXPIRING | RECEIVABLE_DUE_SOON | RECEIVABLE_OVERDUE | LEAD_HOT
+  title       String
+  body        String?
+  link        String?  // ex: /proposals/abc123
+  metadata    Json?
+
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([teamId, createdAt])
+  @@index([teamId, readAt])
+  @@index([userId, readAt])
+}
+
+// Eventos de auditoria do Lead.
+// Padrão único de histórico: data + tipo + descrição + autor + metadata.
+// Tipos: CREATED | UPDATED | STATUS_CHANGED | TEMPERATURE_CHANGED |
+// PROPOSAL_CREATED | PROPOSAL_APPROVED | PROPOSAL_REJECTED |
+// MESSAGE_SENT | NOTE_ADDED | REANALYZED | DELETED | RESTORED |
+// IMPORTED | ASSIGNED
+model LeadEvent {
+  id          String   @id @default(cuid())
+  leadId      String
+  userId      String?
+
+  kind        String
+  description String?
+  metadata    Json?
+
+  createdAt   DateTime @default(now())
+
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt])
+}
+
+// =============================================================================
+// MÓDULO DE CONTRATOS
+// =============================================================================
+
+enum ContractStatus {
+  RASCUNHO          // criado mas não enviado
+  EM_EDICAO         // em edição ativa
+  AGUARDANDO_ASSINATURA  // enviado pra cliente assinar
+  ASSINADO          // assinado pelas partes
+  CANCELADO         // cancelado pelo usuário
+  EXPIRADO          // passou da data limite sem assinar
+  ARQUIVADO         // arquivado pra histórico
+}
+
+enum ContractCategory {
+  PRESTACAO_SERVICO
+  DESENVOLVIMENTO_SITE
+  SISTEMA_SOB_DEMANDA
+  GESTAO_MENSAL
+  CONSULTORIA
+  MANUTENCAO
+  PARCERIA
+  CONTRATO_SIMPLES
+  PERSONALIZADO
+}
+
+// Templates de contrato — modelos prontos disponíveis pro usuário escolher.
+// Templates do sistema têm teamId null (globais), templates do team têm teamId.
+model ContractTemplate {
+  id          String           @id @default(cuid())
+  teamId      String?          // null = global do sistema
+  name        String           // "Desenvolvimento de Site Padrão"
+  description String?
+  category    ContractCategory @default(PERSONALIZADO)
+
+  // Estrutura do template — markdown com variáveis {{nome_cliente}}, etc
+  // Salvamos como string pra preview/edição rápida
+  content     String           @db.Text
+
+  // Variáveis disponíveis nesse template
+  variables   String[]         @default([])
+
+  isActive    Boolean          @default(true)
+  isSystem    Boolean          @default(false)  // templates seedados pelo sistema
+
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  team        Team?            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  contracts   Contract[]
+
+  @@index([teamId, category])
+  @@index([isSystem])
+}
+
+// Biblioteca de cláusulas reutilizáveis.
+// Permite arrastar/clicar pra inserir no contrato.
+model ContractClause {
+  id          String   @id @default(cuid())
+  teamId      String?  // null = global do sistema
+  title       String   // "Cláusula de Cancelamento"
+  category    String   // pagamento | cancelamento | confidencialidade | prazo | multa | suporte | LGPD | entrega
+  content     String   @db.Text
+
+  isSystem    Boolean  @default(false)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, category])
+}
+
+// Contrato — instância editável vinculada a lead/proposta
+model Contract {
+  id          String   @id @default(cuid())
+  teamId      String
+
+  // Numeração sequencial: CTR-2026-0001
+  number      String
+
+  templateId  String?
+  proposalId  String?
+  leadId      String?
+  createdById String
+
+  // Cabeçalho
+  title       String
+  category    ContractCategory @default(PERSONALIZADO)
+  status      ContractStatus   @default(RASCUNHO)
+
+  // Conteúdo do contrato — Markdown com variáveis processadas
+  content     String   @db.Text
+
+  // Dados da empresa contratante (snapshot)
+  companyName     String?
+  companyCnpj     String?
+  companyEmail    String?
+  companyPhone    String?
+  companyWebsite  String?
+  companyAddress  String?
+  companyLogoUrl  String?
+
+  // Dados do cliente (snapshot — pode vir do lead mas é editável)
+  clientName      String?
+  clientDocument  String?  // CPF ou CNPJ
+  clientEmail     String?
+  clientPhone     String?
+  clientAddress   String?
+
+  // Comerciais
+  totalValue      Float?
+  paymentTerms    String?  // "3x sem juros via Pix"
+  contractedItems String?  // descrição dos serviços
+
+  // Datas
+  startDate       DateTime?
+  endDate         DateTime?
+  signedAt        DateTime?
+  expiresAt       DateTime?  // se não assinar até essa data, vira EXPIRADO
+
+  // Variáveis customizadas preenchidas (objeto chave-valor)
+  variables       Json?
+
+  // Configurações visuais
+  showWatermark   Boolean  @default(false)
+  themeColor      String?  // hex
+  fontFamily      String?  @default("Arial")  // Arial | Montserrat | Georgia
+
+  // Soft delete pra preservar histórico
+  deletedAt       DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        Team              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  template    ContractTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  proposal    Proposal?         @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  lead        Lead?             @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdBy   User              @relation("ContractCreatedBy", fields: [createdById], references: [id])
+  events      ContractEvent[]
+  versions    ContractVersion[]
+
+  @@unique([teamId, number])
+  @@index([teamId, status])
+  @@index([teamId, createdAt])
+  @@index([leadId])
+  @@index([proposalId])
+}
+
+// Eventos do contrato (timeline) — mesmo padrão de LeadEvent/ProposalEvent
+model ContractEvent {
+  id          String   @id @default(cuid())
+  contractId  String
+  userId      String?
+
+  kind        String   // CREATED | UPDATED | STATUS_CHANGED | SIGNED | EXPORTED | SENT | CANCELLED
+  description String?
+  metadata    Json?
+
+  createdAt   DateTime @default(now())
+
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([contractId, createdAt])
+}
+
+// Versionamento — snapshot do contrato em cada mudança importante
+model ContractVersion {
+  id          String   @id @default(cuid())
+  contractId  String
+  userId      String?
+
+  versionNumber Int    // sequencial: 1, 2, 3...
+  snapshot      Json   // estado completo do contrato no momento
+
+  notes       String?  // descrição da versão
+
+  createdAt   DateTime @default(now())
+
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([contractId, versionNumber])
+  @@index([contractId])
+}
+
+
+
+// =============================================================================
+// PAINEL ADMINISTRATIVO
+// Adicionar ao final do schema.prisma existente
+// =============================================================================
+
+// Nível de acesso admin
+enum AdminRole {
+  SUPER_ADMIN      // acesso total
+  ADMIN_FINANCIAL  // planos, assinaturas, pagamentos
+  ADMIN_SUPPORT    // usuários, limites, suporte
+  ADMIN_READ       // só leitura
+}
+
+// Status de assinatura controlado pelo admin
+enum SubscriptionStatus {
+  ACTIVE
+  TRIAL
+  PENDING
+  CANCELED
+  EXPIRED
+  COURTESY  // cortesia manual
+}
+
+// Usuário administrador (separado do User comum)
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         AdminRole @default(ADMIN_READ)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  auditLogs    AdminAuditLog[]
+
+  @@index([email])
+}
+
+// Planos de assinatura gerenciados pelo admin
+model Plan {
+  id          String   @id @default(cuid())
+  code        String   @unique  // free, starter, pro, business
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  price       Float    @default(0)    // R$ mensal
+  priceYearly Float    @default(0)    // R$ anual
+
+  // Limites base do plano
+  leadsQuota        Int @default(20)
+  proposalsQuota    Int @default(3)
+  contractsQuota    Int @default(1)
+  messagesQuota     Int @default(20)
+  aiCreditsQuota    Int @default(20)
+  usersQuota        Int @default(1)
+  templatesQuota    Int @default(3)
+  exportsQuota      Int @default(5)
+  storageQuota      Int @default(100)    // MB
+  automationsQuota  Int @default(0)
+  integrationsQuota Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@index([code])
+}
+
+// Assinatura de um Team a um Plan
+model Subscription {
+  id      String @id @default(cuid())
+  teamId  String
+  planId  String
+
+  status       SubscriptionStatus @default(TRIAL)
+  startsAt     DateTime           @default(now())
+  expiresAt    DateTime?
+  trialEndsAt  DateTime?
+  canceledAt   DateTime?
+
+  // Controle financeiro manual
+  paymentMethod  String?   // PIX, Boleto, Cartão, Cortesia
+  lastPaidAt     DateTime?
+  nextDueAt      DateTime?
+  isOverdue      Boolean   @default(false)
+
+  // Observações internas do admin
+  adminNotes     String?
+
+  // Limites PERSONALIZADOS que sobrescrevem/somam ao plano
+  // null = usa o limite do plano; número = usa esse valor
+  customLeadsQuota        Int?
+  customProposalsQuota    Int?
+  customContractsQuota    Int?
+  customMessagesQuota     Int?
+  customAiCreditsQuota    Int?
+  customUsersQuota        Int?
+  customTemplatesQuota    Int?
+  customExportsQuota      Int?
+  customStorageQuota      Int?
+  customAutomationsQuota  Int?
+  customIntegrationsQuota Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  plan Plan         @relation(fields: [planId], references: [id])
+
+  @@unique([teamId])   // 1 assinatura ativa por team
+  @@index([teamId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+// Contador mensal de uso por team
+model UsageCounter {
+  id      String @id @default(cuid())
+  teamId  String
+  period  String  // "YYYY-MM"
+
+  leadsUsed       Int @default(0)
+  proposalsUsed   Int @default(0)
+  contractsUsed   Int @default(0)
+  messagesUsed    Int @default(0)
+  aiCreditsUsed   Int @default(0)
+  exportsUsed     Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, period])
+  @@index([teamId])
+  @@index([period])
+}
+
+// Log de auditoria — toda ação admin fica registrada
+model AdminAuditLog {
+  id          String  @id @default(cuid())
+  adminUserId String
+  targetTeamId String?
+  targetUserId String?
+
+  action      String   // "PLAN_CHANGED", "LIMIT_UPDATED", "ACCOUNT_BLOCKED", etc
+  description String   // texto legível: "Plano alterado de Starter para Pro"
+  before      Json?    // estado anterior
+  after       Json?    // estado novo
+  reason      String?  // motivo informado pelo admin
+
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id])
+
+  @@index([adminUserId])
+  @@index([targetTeamId])
+  @@index([createdAt])
+}
+
+// Alertas administrativos
+model AdminAlert {
+  id       String  @id @default(cuid())
+  teamId   String?
+  kind     String  // "QUOTA_NEAR", "QUOTA_EXCEEDED", "SUBSCRIPTION_EXPIRING", etc
+  title    String
+  message  String
+  severity String  @default("info")  // info, warning, danger
+  isRead   Boolean @default(false)
+  resolvedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([isRead])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+// Feature flags — liberar/bloquear funcionalidades por team
+model FeatureFlag {
+  id      String  @id @default(cuid())
+  teamId  String
+  feature String  // "contracts_ai", "export_pdf", "advanced_reports", etc
+  enabled Boolean @default(false)
+  notes   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, feature])
+  @@index([teamId])
+}
+
+// Comunicados / avisos para usuários
+model Announcement {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  type      String   @default("info")  // info, warning, maintenance, feature
+  isActive  Boolean  @default(true)
+  targetAll Boolean  @default(true)    // true = todos, false = team específicos
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+  createdBy String   // adminUserId
+
+  @@index([isActive])
+}
+
+// Tickets de suporte
+model SupportTicket {
+  id       String  @id @default(cuid())
+  teamId   String
+  userId   String
+  subject  String
+  message  String
+  status   String  @default("open")   // open, in_progress, resolved, closed
+  priority String  @default("medium") // low, medium, high, urgent
+  assignedTo String?  // adminUserId
+  resolvedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  replies SupportReply[]
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@index([status])
+}
+
+model SupportReply {
+  id       String @id @default(cuid())
+  ticketId String
+  authorId String   // userId ou adminUserId
+  isAdmin  Boolean  @default(false)
+  message  String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
