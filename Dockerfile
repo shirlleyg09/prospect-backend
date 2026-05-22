@@ -25,8 +25,11 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/src/database/schema.prisma ./src/database/schema.prisma
+COPY --from=builder /app/src/database/migrations ./src/database/migrations
 
 EXPOSE 3001
 
-CMD ["node", "dist/main.js"]
+# Roda migrate e inicia o servidor
+CMD ["sh", "-c", "npx prisma migrate deploy --schema src/database/schema.prisma || true && node dist/main.js"]
