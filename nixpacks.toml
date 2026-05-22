@@ -1,0 +1,16 @@
+[phases.setup]
+nixPkgs = ["openssl", "chromium", "fontconfig"]
+
+[phases.build]
+cmds = [
+  "npm ci",
+  "npm run prisma:generate",
+  "npm run build"
+]
+
+[start]
+cmd = "npx prisma migrate deploy --schema src/database/schema.prisma || true && node dist/main.js"
+
+[variables]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+PUPPETEER_EXECUTABLE_PATH = "/run/current-system/sw/bin/chromium"
