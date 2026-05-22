@@ -44,6 +44,9 @@ import { SearchExecuteProcessor } from './search-execute.processor';
             // Upstash exige TLS
             ...(isUpstash && { tls: {} }),
             maxRetriesPerRequest: null,
+            lazyConnect: true,
+            connectTimeout: 10000,
+            enableOfflineQueue: false,
           },
           defaultJobOptions: {
             removeOnComplete: { count: 1000, age: 24 * 3600 },
