@@ -1,8 +1,10 @@
 [build]
-builder = "dockerfile"
-dockerfilePath = "Dockerfile"
+buildCommand = "npm ci && npm run prisma:generate && npm run build"
 
 [deploy]
-startCommand = "node dist/main.js"
+startCommand = "npx prisma migrate deploy --schema src/database/schema.prisma || true && node dist/main.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+
+[variables]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
