@@ -22,14 +22,11 @@ export class ProposalTemplateService implements OnModuleInit {
    * Roda uma vez na inicialização do módulo — cria os templates globais
    * se ainda não existirem. Idempotente.
    */
-  async onModuleInit(): Promise<void> {
-    try {
-      await this.seedDefaults();
-    } catch (err) {
-      this.logger.error(
-        `Falha ao seedar ProposalTemplates: ${(err as Error).message}`,
-      );
-    }
+  onModuleInit(): void {
+    // Fire-and-forget: não bloqueia o startup do app
+    this.seedDefaults().catch((err) =>
+      this.logger.error(`Falha ao seedar ProposalTemplates: ${(err as Error).message}`),
+    );
   }
 
   async seedDefaults(): Promise<void> {

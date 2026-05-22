@@ -27,9 +27,11 @@ export class ContractService implements OnModuleInit {
     @Inject(AIService) private readonly ai: AIService,
   ) {}
 
-  async onModuleInit() {
-    await this.seedSystemTemplates();
-    await this.seedSystemClauses();
+  onModuleInit() {
+    // Fire-and-forget: não bloqueia o startup do app
+    Promise.all([this.seedSystemTemplates(), this.seedSystemClauses()]).catch(
+      (err) => this.logger.error(`Seed de contratos falhou: ${(err as Error).message}`),
+    );
   }
 
   // =========================================================================

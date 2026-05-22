@@ -64,14 +64,11 @@ export class MessageService implements OnModuleInit {
   // SEED — roda na inicialização
   // --------------------------------------------------------------------------
 
-  async onModuleInit(): Promise<void> {
-    try {
-      await this.seedDefaults();
-    } catch (err) {
-      this.logger.error(
-        `Falha ao seedar MessageTemplates: ${(err as Error).message}`,
-      );
-    }
+  onModuleInit(): void {
+    // Fire-and-forget: não bloqueia o startup do app
+    this.seedDefaults().catch((err) =>
+      this.logger.error(`Falha ao seedar MessageTemplates: ${(err as Error).message}`),
+    );
   }
 
   async seedDefaults(): Promise<void> {
