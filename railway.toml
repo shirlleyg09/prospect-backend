@@ -2,7 +2,7 @@
 buildCommand = "npm ci && npm run prisma:generate && npm run build"
 
 [deploy]
-startCommand = "npx prisma migrate deploy --schema src/database/schema.prisma || true && node dist/main.js"
+startCommand = "node dist/main.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
 
