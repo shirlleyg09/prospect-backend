@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -12,6 +13,7 @@ import { CurrentTeam } from '../../common/decorators/current-team.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { TeamScopeGuard } from '../../common/guards/team-scope.guard';
+import { AIService } from '../ai/services/ai.service';
 import {
   BulkAssignDto,
   CreateManualLeadDto,
@@ -24,7 +26,10 @@ import { LeadService } from './lead.service';
 @Controller('leads')
 @UseGuards(JwtAuthGuard, TeamScopeGuard)
 export class LeadController {
-  constructor(private readonly leadService: LeadService) {}
+  constructor(
+    private readonly leadService: LeadService,
+    private readonly aiService: AIService,
+  ) {}
 
   @Get()
   list(@CurrentTeam() teamId: string, @Query() q: ListLeadsQueryDto) {
@@ -96,8 +101,18 @@ export class LeadController {
   }
 
   @Post('analyze-pending')
-  async analyzePending(@CurrentTeam() teamId: string) {
-    return this.leadService.enqueueAnalysisForPending(teamId);
+  async analyzePending(
+    @CurrentTeam() teamId: string,
+    @Body() body: {
+      searchId?: string;
+      niche?: string;
+      city?: string;
+      temperature?: string;
+      createdAfter?: string;
+      createdBefore?: string;
+    },
+  ) {
+    return this.leadService.enqueueAnalysisForPending(teamId, body);
   }
 
   /**
@@ -106,5 +121,35 @@ export class LeadController {
   @Get(':id/history')
   history(@CurrentTeam() teamId: string, @Param('id') id: string) {
     return this.leadService.getHistory(teamId, id);
+  }
+
+  /**
+   * Gera um prompt profissional para desenvolvimento de site personalizado ao lead.
+   * Usa dados públicos do lead + templates de nicho para criar um prompt rico e acionável.
+   */
+  @Post(':id/generate-site-prompt')
+  async generateSitePrompt(
+    @CurrentTeam() teamId: string,
+    @Param('id') id: string,
+  ) {
+    const lead = await this.leadService.findById(teamId, id);
+    if (!lead) throw new NotFoundException('Lead não encontrado');
+    const result = await this.aiService.generateSitePrompt(lead);
+    return result;
+  }
+
+  /**
+   * Gera análise comercial completa: resumo do negócio, objeções, roteiro de ligação,
+   * mensagem de WhatsApp personalizada e prioridade de contato.
+   */
+  @Post(':id/commercial-analysis')
+  async generateCommercialAnalysis(
+    @CurrentTeam() teamId: string,
+    @Param('id') id: string,
+  ) {
+    const lead = await this.leadService.findById(teamId, id);
+    if (!lead) throw new NotFoundException('Lead não encontrado');
+    const result = await this.aiService.generateCommercialAnalysis(lead);
+    return result;
   }
 }

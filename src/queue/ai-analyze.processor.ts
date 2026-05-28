@@ -9,12 +9,11 @@
  *   Idempotente — um lead re-analisado simplesmente atualiza os scores.
  */
 
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { AIService } from '../modules/ai/services/ai.service';
 import { LeadService } from '../modules/leads/lead.service';
+import { PgQueueService } from './pg-queue.service';
 import { QUEUE_AI_ANALYZE } from './queue.constants';
 
 interface AnalyzeLeadJob {
@@ -22,28 +21,28 @@ interface AnalyzeLeadJob {
   leadId: string;
 }
 
-@Processor(QUEUE_AI_ANALYZE, {
-  // Concurrency mais alto porque o bottleneck é o LLM, não CPU local.
-  // Ajuste considerando rate limits do provider de IA.
-  concurrency: 2,
-  limiter: {
-    max: 100, // máx 100 jobs
-    duration: 60_000, // por minuto → respeita rate limit do LLM
-  },
-})
-export class AIAnalyzeProcessor extends WorkerHost {
+@Injectable()
+export class AIAnalyzeProcessor implements OnModuleInit {
   private readonly logger = new Logger(AIAnalyzeProcessor.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly ai: AIService,
     private readonly leadService: LeadService,
-  ) {
-    super();
+    private readonly queue: PgQueueService,
+  ) {}
+
+  async onModuleInit() {
+    await this.queue.work<AnalyzeLeadJob>(
+      QUEUE_AI_ANALYZE,
+      (data) => this.process(data),
+      { concurrency: 2 },
+    );
+    this.logger.log(`Worker registrado: ${QUEUE_AI_ANALYZE}`);
   }
 
-  async process(job: Job<AnalyzeLeadJob>): Promise<void> {
-    const { leadId } = job.data;
+  private async process(data: AnalyzeLeadJob): Promise<void> {
+    const { leadId } = data;
 
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) {
@@ -51,7 +50,7 @@ export class AIAnalyzeProcessor extends WorkerHost {
       return;
     }
 
-    // Skip se já foi analisado recentemente (janela configurável)
+    // Skip se já foi analisado recentemente (janela de 24h)
     if (lead.aiAnalyzedAt && Date.now() - lead.aiAnalyzedAt.getTime() < 24 * 3600 * 1000) {
       this.logger.debug(`Lead ${leadId} analisado recentemente — skip`);
       return;

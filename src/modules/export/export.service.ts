@@ -8,11 +8,10 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { Lead } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../../database/prisma.service';
+import { PgQueueService } from '../../queue/pg-queue.service';
 import { QUEUE_EXPORT } from '../../queue/queue.constants';
 
 export type ExportFormat = 'csv' | 'xlsx' | 'pdf';
@@ -27,7 +26,7 @@ export interface ExportFilters {
 export class ExportService {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(QUEUE_EXPORT) private readonly queue: Queue,
+    private readonly queue: PgQueueService,
   ) {}
 
   /**
@@ -76,8 +75,8 @@ export class ExportService {
    * O worker salva o arquivo em storage e notifica via webhook/SSE.
    */
   async enqueue(teamId: string, format: ExportFormat, filters: ExportFilters) {
-    const job = await this.queue.add('generate-export', { teamId, format, filters });
-    return { jobId: job.id, status: 'queued' };
+    const jobId = await this.queue.add(QUEUE_EXPORT, { teamId, format, filters });
+    return { jobId, status: 'queued' };
   }
 
   // ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ enum LeadTemperature {
   COLD
   WARM
   HOT
+  VERY_HOT
 }
 
 enum InteractionChannel {

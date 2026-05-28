@@ -66,7 +66,9 @@ export class ProviderService {
       return { leads: [], runs: [] };
     }
 
-    // Executa em paralelo com settlement — um falhar não derruba os outros
+    // Sem inflação de limit: cada provider recebe exatamente o limite solicitado.
+    // Providers distintos raramente têm overlap suficiente para justificar o
+    // custo extra de 2× em cada API call. Se o usuário pediu 20, gasta 20 por provider.
     const settled = await Promise.allSettled(
       configs.map((cfg) => this.runSingle(cfg, opts)),
     );

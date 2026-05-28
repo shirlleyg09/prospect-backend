@@ -1,15 +1,11 @@
-import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
-import { QUEUE_AI_ANALYZE } from '../../queue/queue.constants';
+import { AIModule } from '../ai/ai.module';
 import { LeadController } from './lead.controller';
 import { LeadService } from './lead.service';
 
 @Module({
-  imports: [
-    DatabaseModule,
-    BullModule.registerQueue({ name: QUEUE_AI_ANALYZE }),
-  ],
+  imports: [DatabaseModule, AIModule],
   controllers: [LeadController],
   providers: [LeadService],
   exports: [LeadService],

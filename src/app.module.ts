@@ -22,6 +22,7 @@ import { ContractsModule } from './modules/contracts/contracts.module';
 import { ProvidersModule } from './modules/providers/providers.module';
 import { ProposalsModule } from './modules/proposals/proposals.module';
 import { SearchesModule } from './modules/searches/searches.module';
+import { PgQueueModule } from './queue/pg-queue.module';
 import { QueueModule } from './queue/queue.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { QueueModule } from './queue/queue.module';
     ]),
 
     DatabaseModule,
+    PgQueueModule,
 
     AuthModule,
     ProvidersModule,

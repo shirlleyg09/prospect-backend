@@ -10,11 +10,10 @@
  *   Nunca executa scraping inline — sempre via fila.
  */
 
-import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Search, SearchStatus } from '@prisma/client';
-import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
+import { PgQueueService } from '../../queue/pg-queue.service';
 import { QUEUE_SEARCH_EXECUTE } from '../../queue/queue.constants';
 import { LeadService } from '../leads/lead.service';
 import { ProviderService } from '../providers/provider.service';
@@ -28,7 +27,7 @@ export class SearchService {
     private readonly prisma: PrismaService,
     private readonly providerService: ProviderService,
     private readonly leadService: LeadService,
-    @InjectQueue(QUEUE_SEARCH_EXECUTE) private readonly queue: Queue,
+    private readonly queue: PgQueueService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -50,14 +49,9 @@ export class SearchService {
     });
 
     await this.queue.add(
-      'execute-search',
+      QUEUE_SEARCH_EXECUTE,
       { searchId: search.id, teamId, limit: dto.limit },
-      {
-        attempts: 2,
-        backoff: { type: 'exponential', delay: 10_000 },
-        removeOnComplete: 500,
-        removeOnFail: 200,
-      },
+      { attempts: 2, backoffDelay: 10 },
     );
 
     this.logger.log(`Search criada id=${search.id} team=${teamId} niche="${dto.niche}"`);

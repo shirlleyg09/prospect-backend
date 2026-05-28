@@ -2,7 +2,7 @@
   "name": "prospect-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "Prospect \u2014 SaaS de prospec\u00e7\u00e3o inteligente (API)",
+  "description": "Prospect — SaaS de prospecção inteligente (API)",
   "scripts": {
     "build": "nest build",
     "start": "nest start",
@@ -40,6 +40,7 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pdfkit": "^0.15.0",
+    "pg-boss": "^12.18.2",
     "pino": "^9.3.2",
     "pino-http": "^10.3.0",
     "pino-pretty": "^11.2.2",

@@ -15,10 +15,16 @@ import { AIProvider } from '../ai-provider.interface';
 import {
   APPROACH_SYSTEM,
   APPROACH_USER,
+  COMMERCIAL_ANALYSIS_SYSTEM,
+  COMMERCIAL_ANALYSIS_USER,
   INSIGHTS_SYSTEM,
   INSIGHTS_USER,
   SCORING_SYSTEM,
   SCORING_USER,
+  SITE_BRIEFING_SYSTEM,
+  SITE_BRIEFING_USER,
+  SITE_META_SYSTEM,
+  SITE_META_USER,
 } from '../prompts/prompts';
 
 export const AI_PROVIDER_TOKEN = Symbol('AI_PROVIDER');
@@ -26,9 +32,31 @@ export const AI_PROVIDER_TOKEN = Symbol('AI_PROVIDER');
 export interface LeadScoring {
   leadScore: number;
   opportunityScore: number;
-  temperature: 'COLD' | 'WARM' | 'HOT';
+  temperature: 'COLD' | 'WARM' | 'HOT' | 'VERY_HOT';
   estimatedTicket: number;
   reasoning: string;
+}
+
+export interface SitePromptResult {
+  sitePrompt: string;
+  siteType: string;
+  recommendedSections: string[];
+  visualStyle: string;
+  primaryCTA: string;
+  estimatedPages: number;
+}
+
+export interface CommercialAnalysis {
+  resumoComercial: string;
+  problemasIdentificados: string[];
+  oportunidadeRecomendada: string;
+  melhorServico: string;
+  argumentoAbordagem: string;
+  mensagemWhatsApp: string;
+  roteiroChamada: string;
+  objecoesProvaveis: string[];
+  comoContornar: Record<string, string>;
+  prioridadeContato: 'IMEDIATA' | 'ALTA' | 'MEDIA' | 'BAIXA';
 }
 
 export interface LeadInsight {
@@ -145,6 +173,64 @@ export class AIService {
       tag: args.tag ?? 'completeWithJson',
     });
     return res;
+  }
+
+  /**
+   * Gera um briefing ultra-detalhado para desenvolvimento de site.
+   * Dois chamados em paralelo:
+   *   1. Briefing completo em texto livre (sem JSON mode) → máximo de detalhe
+   *   2. Metadados compactos em JSON (siteType, seções, estilo visual, CTA, nº páginas)
+   */
+  async generateSitePrompt(lead: Partial<Lead>): Promise<SitePromptResult> {
+    const [briefingRes, metaRes] = await Promise.all([
+      // Chamado 1: texto livre sem restrição JSON — o LLM pode escrever tudo
+      this.ai.complete({
+        system: SITE_BRIEFING_SYSTEM,
+        user: SITE_BRIEFING_USER(lead),
+        jsonMode: false,
+        temperature: 0.65,
+        maxTokens: 8000,
+        tag: 'generateSitePrompt:briefing',
+      }),
+      // Chamado 2: JSON pequeno com metadados estruturados
+      this.ai.complete({
+        system: SITE_META_SYSTEM,
+        user: SITE_META_USER(lead),
+        jsonMode: true,
+        temperature: 0.2,
+        maxTokens: 600,
+        tag: 'generateSitePrompt:meta',
+      }),
+    ]);
+
+    const meta = this.parseJson<Omit<SitePromptResult, 'sitePrompt'>>(
+      metaRes.text,
+      'generateSitePrompt:meta',
+    );
+
+    return {
+      sitePrompt: briefingRes.text,
+      siteType: meta.siteType,
+      recommendedSections: meta.recommendedSections,
+      visualStyle: meta.visualStyle,
+      primaryCTA: meta.primaryCTA,
+      estimatedPages: meta.estimatedPages,
+    };
+  }
+
+  /**
+   * Gera análise comercial completa: resumo, objeções, roteiro de ligação, mensagem WhatsApp.
+   */
+  async generateCommercialAnalysis(lead: Partial<Lead>): Promise<CommercialAnalysis> {
+    const res = await this.ai.complete({
+      system: COMMERCIAL_ANALYSIS_SYSTEM,
+      user: COMMERCIAL_ANALYSIS_USER(lead),
+      jsonMode: true,
+      temperature: 0.4,
+      maxTokens: 1500,
+      tag: 'generateCommercialAnalysis',
+    });
+    return this.parseJson<CommercialAnalysis>(res.text, 'generateCommercialAnalysis');
   }
 
   // ---------------------------------------------------------------------------

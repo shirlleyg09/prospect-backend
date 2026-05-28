@@ -18,6 +18,7 @@ import {
 
 export class ListLeadsQueryDto {
   @IsOptional() @IsString() search?: string;
+  @IsOptional() @IsString() searchId?: string;
   @IsOptional() @IsString() niche?: string;
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() state?: string;

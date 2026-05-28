@@ -113,6 +113,14 @@ export class GooglePlacesProvider implements LeadProvider {
   private readonly detailsConcurrency: number;
   private readonly apiKey: string;
 
+  /**
+   * Cache do healthcheck — evita chamar a API a cada busca.
+   * TTL: 10 minutos. Cada chamada ao isAvailable() dentro da janela
+   * reutiliza o resultado sem fazer nenhuma requisição HTTP.
+   */
+  private healthCache: { ok: boolean; expiresAt: number } | null = null;
+  private readonly HEALTH_TTL_MS = 10 * 60_000;
+
   constructor(opts: GooglePlacesOptions) {
     this.name = opts.name;
     this.apiKey = opts.apiKey;
@@ -126,40 +134,68 @@ export class GooglePlacesProvider implements LeadProvider {
   }
 
   /**
-   * Ping barato pra validar key — faz uma busca mínima ("test")
-   * e vê se retorna OK ou erro de auth. Custa 1 request.
+   * Valida a key com cache de 10 minutos.
+   * Sem cache: usa findplacefromtext com fields=place_id (SKU "IDs only",
+   * $5/1000 vs $32/1000 do Text Search anterior) — 6× mais barato.
+   * Com cache ativo: zero requisições HTTP.
    */
   async isAvailable(): Promise<boolean> {
+    const now = Date.now();
+    if (this.healthCache && now < this.healthCache.expiresAt) {
+      return this.healthCache.ok;
+    }
     try {
-      await this.fetchAccountCheck();
+      await this.pingKey();
+      this.healthCache = { ok: true, expiresAt: now + this.HEALTH_TTL_MS };
       return true;
     } catch (err) {
+      this.healthCache = { ok: false, expiresAt: now + this.HEALTH_TTL_MS };
       this.logger.warn(`Google Places indisponível: ${(err as Error).message}`);
       return false;
     }
   }
 
   /**
-   * Healthcheck público — usado pelo botão "Testar conexão".
-   * Faz uma busca mínima ("cafe Recife") e valida status da resposta.
+   * Healthcheck público — chamado explicitamente pelo botão "Testar conexão".
+   * Invalida o cache para forçar verificação fresca.
+   * Usa findplacefromtext (SKU IDs only, $5/1000) em vez de textsearch ($32/1000).
    */
   async fetchAccountCheck(): Promise<{ ok: true; message: string }> {
+    this.healthCache = null; // força re-check na próxima busca também
+    try {
+      await this.pingKey();
+      return { ok: true, message: 'Key válida e billing ativo' };
+    } catch (err) {
+      throw this.translateError(err);
+    }
+  }
+
+  /**
+   * Chamada mínima para validar a key.
+   * findplacefromtext + fields=place_id = SKU "IDs only" = $5/1000.
+   * Retorna OK, ZERO_RESULTS ou INVALID_REQUEST para keys válidas.
+   * Retorna REQUEST_DENIED apenas para keys inválidas/sem permissão.
+   */
+  private async pingKey(): Promise<void> {
     try {
       const { data } = await this.http.get<GooglePlacesResponse<unknown>>(
-        '/textsearch/json',
+        '/findplacefromtext/json',
         {
           params: {
-            query: 'cafe Recife',
-            language: 'pt-BR',
+            input: 'a',
+            inputtype: 'textquery',
+            fields: 'place_id',
             key: this.apiKey,
           },
         },
       );
-      this.checkStatus(data);
-      return {
-        ok: true,
-        message: 'Key válida e billing ativo',
-      };
+      // OK, ZERO_RESULTS e INVALID_REQUEST indicam key válida (errou na query, não na auth)
+      if (
+        data.status === 'REQUEST_DENIED' ||
+        data.status === 'UNKNOWN_ERROR'
+      ) {
+        this.checkStatus(data);
+      }
     } catch (err) {
       throw this.translateError(err);
     }

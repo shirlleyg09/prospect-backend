@@ -1,15 +1,14 @@
 /**
  * @file search-execute.processor.ts
  * @description
- *   Worker BullMQ que consome a fila `search.execute`. Cada job invoca
+ *   Worker que consome a fila `search.execute`. Cada job invoca
  *   `SearchService.execute(searchId)` — a lógica de orquestração e persistência
  *   mora no service, o worker é apenas a casca.
  */
 
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SearchService } from '../modules/searches/search.service';
+import { PgQueueService } from './pg-queue.service';
 import { QUEUE_SEARCH_EXECUTE } from './queue.constants';
 
 interface ExecuteSearchJob {
@@ -18,18 +17,26 @@ interface ExecuteSearchJob {
   limit?: number;
 }
 
-@Processor(QUEUE_SEARCH_EXECUTE, {
-  concurrency: 3, // ajuste conforme capacidade dos providers
-})
-export class SearchExecuteProcessor extends WorkerHost {
+@Injectable()
+export class SearchExecuteProcessor implements OnModuleInit {
   private readonly logger = new Logger(SearchExecuteProcessor.name);
 
-  constructor(private readonly searchService: SearchService) {
-    super();
+  constructor(
+    private readonly searchService: SearchService,
+    private readonly queue: PgQueueService,
+  ) {}
+
+  async onModuleInit() {
+    await this.queue.work<ExecuteSearchJob>(
+      QUEUE_SEARCH_EXECUTE,
+      (data) => this.process(data),
+      { concurrency: 3 },
+    );
+    this.logger.log(`Worker registrado: ${QUEUE_SEARCH_EXECUTE}`);
   }
 
-  async process(job: Job<ExecuteSearchJob>): Promise<void> {
-    this.logger.log(`Iniciando execute-search id=${job.data.searchId} attempt=${job.attemptsMade + 1}`);
-    await this.searchService.execute(job.data.searchId, job.data.limit);
+  private async process(data: ExecuteSearchJob): Promise<void> {
+    this.logger.log(`Iniciando execute-search id=${data.searchId}`);
+    await this.searchService.execute(data.searchId, data.limit);
   }
 }

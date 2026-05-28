@@ -1,12 +1,10 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
-import { BullModule, InjectQueue } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import type { Response } from 'express';
 import { CurrentTeam } from '../../common/decorators/current-team.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { TeamScopeGuard } from '../../common/guards/team-scope.guard';
 import { DatabaseModule } from '../../database/database.module';
-import { QUEUE_EXPORT } from '../../queue/queue.constants';
 import { ExportService, ExportFormat } from './export.service';
 
 @Controller('exports')
@@ -36,7 +34,7 @@ export class ExportController {
 }
 
 @Module({
-  imports: [DatabaseModule, BullModule.registerQueue({ name: QUEUE_EXPORT })],
+  imports: [DatabaseModule],
   controllers: [ExportController],
   providers: [ExportService],
   exports: [ExportService],

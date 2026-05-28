@@ -10,10 +10,9 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { SearchStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { PgQueueService } from '../../queue/pg-queue.service';
 import { QUEUE_SEARCH_EXECUTE } from '../../queue/queue.constants';
 
 @Injectable()
@@ -22,7 +21,7 @@ export class AutomationService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(QUEUE_SEARCH_EXECUTE) private readonly queue: Queue,
+    private readonly queue: PgQueueService,
   ) {}
 
   /**
@@ -67,7 +66,7 @@ export class AutomationService {
       });
 
       await this.queue.add(
-        'execute-search',
+        QUEUE_SEARCH_EXECUTE,
         { searchId: clone.id, teamId: clone.teamId },
         { attempts: 2 },
       );

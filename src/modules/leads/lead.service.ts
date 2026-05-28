@@ -12,12 +12,11 @@
  */
 
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
 import { Lead, Prisma } from '@prisma/client';
-import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
 import { NormalizedLead } from '../providers/interfaces/lead-provider.interface';
 import { CreateManualLeadDto, ListLeadsQueryDto, UpdateLeadDto } from './dto/lead.dto';
+import { PgQueueService } from '../../queue/pg-queue.service';
 import { QUEUE_AI_ANALYZE } from '../../queue/queue.constants';
 
 export interface PaginatedLeads {
@@ -33,7 +32,7 @@ export class LeadService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(QUEUE_AI_ANALYZE) private readonly aiQueue: Queue,
+    private readonly aiQueue: PgQueueService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -43,6 +42,7 @@ export class LeadService {
   async list(teamId: string, q: ListLeadsQueryDto): Promise<PaginatedLeads> {
     const where: Prisma.LeadWhereInput = {
       teamId,
+      ...(q.searchId && { searchId: q.searchId }),
       ...(q.niche && { niche: { contains: q.niche, mode: 'insensitive' } }),
       ...(q.city && { city: { contains: q.city, mode: 'insensitive' } }),
       ...(q.state && { state: q.state }),
@@ -61,11 +61,9 @@ export class LeadService {
       ...(q.createdAfter || q.createdBefore
         ? {
             createdAt: {
+              // Frontend envia ISO completo com offset local — usamos direto
               ...(q.createdAfter && { gte: new Date(q.createdAfter) }),
-              // createdBefore é inclusivo do dia inteiro — somamos 23:59:59
-              ...(q.createdBefore && {
-                lte: endOfDayUtc(new Date(q.createdBefore)),
-              }),
+              ...(q.createdBefore && { lte: new Date(q.createdBefore) }),
             },
           }
         : {}),
@@ -447,15 +445,10 @@ export class LeadService {
 
     // Enfileira análise de IA em batch — uma task por lead, com backoff
     await this.aiQueue.addBulk(
+      QUEUE_AI_ANALYZE,
       ids.map((leadId) => ({
-        name: 'analyze-lead',
         data: { teamId, leadId },
-        opts: {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
-          removeOnComplete: 1000,
-          removeOnFail: 500,
-        },
+        opts: { attempts: 3, backoffDelay: 5 },
       })),
     );
 
@@ -474,7 +467,7 @@ export class LeadService {
     payload: {
       leadScore: number;
       opportunityScore: number;
-      temperature: 'COLD' | 'WARM' | 'HOT';
+      temperature: 'COLD' | 'WARM' | 'HOT' | 'VERY_HOT';
       estimatedTicket: number;
       insights: Prisma.JsonValue;
       valueReason: string;
@@ -485,7 +478,8 @@ export class LeadService {
       data: {
         leadScore: payload.leadScore,
         opportunityScore: payload.opportunityScore,
-        temperature: payload.temperature,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        temperature: payload.temperature as any,
         estimatedTicket: payload.estimatedTicket,
         insights: payload.insights as Prisma.InputJsonValue,
         valueReason: payload.valueReason,
@@ -591,15 +585,10 @@ export class LeadService {
     });
 
     await this.aiQueue.addBulk(
+      QUEUE_AI_ANALYZE,
       leads.map((l) => ({
-        name: 'analyze-lead',
         data: { teamId, leadId: l.id },
-        opts: {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
-          removeOnComplete: 1000,
-          removeOnFail: 500,
-        },
+        opts: { attempts: 3, backoffDelay: 5 },
       })),
     );
 
@@ -623,9 +612,25 @@ export class LeadService {
    */
   async enqueueAnalysisForPending(
     teamId: string,
+    filters?: {
+      searchId?: string;
+      niche?: string;
+      city?: string;
+      temperature?: string;
+      createdAfter?: string;
+      createdBefore?: string;
+    },
   ): Promise<{ enqueued: number }> {
+    const where: any = { teamId, leadScore: null };
+    if (filters?.searchId)    where.searchId = filters.searchId;
+    if (filters?.niche)       where.niche = { contains: filters.niche, mode: 'insensitive' };
+    if (filters?.city)        where.city  = { contains: filters.city,  mode: 'insensitive' };
+    if (filters?.temperature) where.temperature = filters.temperature;
+    if (filters?.createdAfter)  where.createdAt = { ...where.createdAt, gte: new Date(filters.createdAfter) };
+    if (filters?.createdBefore) where.createdAt = { ...where.createdAt, lte: new Date(filters.createdBefore) };
+
     const pending = await this.prisma.lead.findMany({
-      where: { teamId, leadScore: null },
+      where,
       select: { id: true },
       take: 500,
     });
@@ -644,8 +649,10 @@ export class LeadService {
    * No update, só sobrescrevemos campos NULOS no banco — preservamos
    * enriquecimentos feitos pela equipe (ex: email validado manualmente).
    */
-  private mergeUpdate(data: Prisma.LeadUncheckedCreateInput): Prisma.LeadUpdateInput {
+  private mergeUpdate(data: Prisma.LeadUncheckedCreateInput): Prisma.LeadUncheckedUpdateInput {
     return {
+      // Sempre atualiza searchId para que o lead apareça na busca mais recente
+      searchId: data.searchId,
       phone: data.phone ?? undefined,
       email: data.email ?? undefined,
       website: data.website ?? undefined,
@@ -705,12 +712,3 @@ export class LeadService {
   }
 }
 
-/**
- * Retorna a data com hora 23:59:59.999 no mesmo dia.
- * Usado pra tornar o filtro `createdBefore` inclusivo do dia inteiro.
- */
-function endOfDayUtc(date: Date): Date {
-  const d = new Date(date);
-  d.setUTCHours(23, 59, 59, 999);
-  return d;
-}
