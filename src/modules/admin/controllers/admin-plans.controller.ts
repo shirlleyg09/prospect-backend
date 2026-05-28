@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { AdminGuard } from '../guards/admin.guard';
+import { AdminGuard, CurrentAdmin } from '../guards/admin.guard';
 import { AdminPlansService } from '../services/admin-plans.service';
 
 @Controller('admin/plans')
@@ -7,8 +7,19 @@ import { AdminPlansService } from '../services/admin-plans.service';
 export class AdminPlansController {
   constructor(private readonly svc: AdminPlansService) {}
 
-  @Get() list() { return this.svc.list(); }
+  @Get()  list() { return this.svc.list(); }
   @Post() create(@Body() dto: any) { return this.svc.create(dto); }
-  @Patch(':id') update(@Param('id') id: string, @Body() dto: any) { return this.svc.update(id, dto); }
-  @Delete(':id') remove(@Param('id') id: string) { return this.svc.deactivate(id); }
+
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @Body() dto: any,
+    @CurrentAdmin('id') adminId: string,
+  ) { return this.svc.update(id, dto, adminId); }
+
+  @Delete(':id')
+  remove(
+    @Param('id') id: string,
+    @CurrentAdmin('id') adminId: string,
+  ) { return this.svc.deactivate(id, adminId); }
 }

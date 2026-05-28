@@ -43,7 +43,12 @@ export class AdminUsersService {
           memberships: {
             select: {
               role: true,
-              team: { select: { id: true, name: true, slug: true } },
+              team: {
+                select: {
+                  id: true, name: true, slug: true,
+                  subscriptions: { select: { status: true }, take: 1 },
+                },
+              },
             },
           },
         },
@@ -51,7 +56,23 @@ export class AdminUsersService {
       this.prisma.user.count({ where }),
     ]);
 
-    return { items: users, total, page, perPage };
+    const items = users.map((u) => {
+      const subStatus = u.memberships[0]?.team?.subscriptions[0]?.status;
+      const isActive = subStatus === 'ACTIVE' || subStatus === 'TRIAL' || subStatus === 'COURTESY';
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        createdAt: u.createdAt,
+        isActive,
+        memberships: u.memberships.map((m) => ({
+          role: m.role,
+          team: { id: m.team.id, name: m.team.name, slug: m.team.slug },
+        })),
+      };
+    });
+
+    return { items, total, page, totalPages: Math.ceil(total / perPage) };
   }
 
   async updateUser(id: string, dto: any) {

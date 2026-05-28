@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
-import { AdminGuard } from '../guards/admin.guard';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { AdminGuard, CurrentAdmin } from '../guards/admin.guard';
 import { AdminSubscriptionsService } from '../services/admin-subscriptions.service';
 
 @Controller('admin/subscriptions')
@@ -17,8 +17,20 @@ export class AdminSubscriptionsController {
     return this.svc.list({ page: +page, perPage: +perPage, status, search });
   }
 
+  @Post()
+  create(
+    @Body() dto: any,
+    @CurrentAdmin('id') adminId: string,
+  ) {
+    return this.svc.create(dto, adminId);
+  }
+
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: any) {
-    return this.svc.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: any,
+    @CurrentAdmin('id') adminId: string,
+  ) {
+    return this.svc.update(id, dto, adminId);
   }
 }

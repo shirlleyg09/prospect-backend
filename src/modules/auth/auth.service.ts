@@ -14,7 +14,7 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { PipelineStageKind, Role } from '@prisma/client';
+import { PipelineStageKind, Role, SubscriptionStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.service';
 
@@ -89,6 +89,23 @@ export class AuthService {
           color,
         })),
       });
+
+      // Assinatura free automática com trial de 14 dias
+      const freePlan = await tx.plan.findUnique({ where: { code: 'free' } });
+      if (freePlan) {
+        await tx.subscription.create({
+          data: {
+            teamId: team.id,
+            planId: freePlan.id,
+            status: SubscriptionStatus.TRIAL,
+            trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          },
+        });
+        const period = new Date().toISOString().slice(0, 7);
+        await tx.usageCounter.create({
+          data: { teamId: team.id, period },
+        });
+      }
 
       return { user, teamId: team.id, role: Role.OWNER };
     });

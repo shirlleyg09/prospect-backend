@@ -25,19 +25,32 @@ export class AdminFeatureFlagsService {
     }
 
     // Aggregate stats across all teams
-    const stats = await this.prisma.featureFlag.groupBy({
+    const totalTeams = await this.prisma.team.count();
+    const enabledStats = await this.prisma.featureFlag.groupBy({
       by: ['feature'],
       _count: { enabled: true },
       where: { enabled: true },
     });
-    return stats;
+    const statsMap = Object.fromEntries(enabledStats.map((s) => [s.feature, s._count.enabled]));
+
+    return ALL_FEATURES.map((f) => ({
+      feature: f,
+      enabledCount: statsMap[f] ?? 0,
+      totalTeams,
+    }));
   }
 
-  async toggle(teamId: string, feature: string, enabled: boolean, notes?: string) {
+  async toggle(teamId: string, feature: string, enabled?: boolean, notes?: string) {
+    // If enabled is not provided, flip the current value
+    const current = await this.prisma.featureFlag.findUnique({
+      where: { teamId_feature: { teamId, feature } },
+    });
+    const newEnabled = enabled !== undefined ? enabled : !(current?.enabled ?? false);
+
     return this.prisma.featureFlag.upsert({
       where: { teamId_feature: { teamId, feature } },
-      create: { teamId, feature, enabled, notes },
-      update: { enabled, notes },
+      create: { teamId, feature, enabled: newEnabled, notes },
+      update: { enabled: newEnabled, notes },
     });
   }
 

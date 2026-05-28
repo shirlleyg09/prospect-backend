@@ -57,20 +57,26 @@ export class AdminCompaniesService {
         subscription: sub ? {
           id: sub.id,
           status: sub.status,
-          planName: sub.plan?.name ?? t.plan,
-          planCode: sub.plan?.code ?? t.plan,
-          price: sub.plan?.price ?? 0,
-          expiresAt: sub.expiresAt,
-          trialEndsAt: sub.trialEndsAt,
-          nextDueAt: sub.nextDueAt,
+          plan: {
+            name: sub.plan?.name ?? t.plan,
+            code: sub.plan?.code ?? t.plan,
+            price: sub.plan?.price ?? 0,
+          },
+          currentPeriodEnd: sub.expiresAt ?? sub.trialEndsAt ?? sub.nextDueAt,
           isOverdue: sub.isOverdue,
           paymentMethod: sub.paymentMethod,
         } : null,
-        counts: t._count,
+        _count: {
+          members: t._count.memberships,
+          leads: t._count.leads,
+          searches: t._count.searches,
+          proposals: t._count.proposals,
+          contracts: t._count.contracts,
+        },
       };
     });
 
-    return { items, total, page, perPage };
+    return { items, total, page, totalPages: Math.ceil(total / perPage) };
   }
 
   async getOne(teamId: string) {

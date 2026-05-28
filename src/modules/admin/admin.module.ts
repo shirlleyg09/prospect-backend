@@ -61,6 +61,6 @@ import { AdminAuditService } from './services/admin-audit.service';
     AdminTicketsService,
     AdminAuditService,
   ],
-  exports: [AdminGuard, AdminAuthService],
+  exports: [AdminGuard, AdminAuthService, AdminAuditService],
 })
 export class AdminModule {}
