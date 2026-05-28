@@ -54,6 +54,10 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
+  // Health check (sem prefixo, Railway usa GET /)
+  const httpAdapter = app.getHttpAdapter();
+  httpAdapter.get('/health', (_req: any, res: any) => res.status(200).json({ status: 'ok' }));
+
   // Prefixo de API
   app.setGlobalPrefix('api/v1');
 
