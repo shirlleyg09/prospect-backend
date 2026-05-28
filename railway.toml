@@ -11,3 +11,4 @@ healthcheckTimeout = 30
 [variables]
 PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
 PORT = "3000"
+NODE_ENV = "production"
