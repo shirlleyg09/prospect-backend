@@ -1,10 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Post,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentTeam } from '../../common/decorators/current-team.decorator';
@@ -36,5 +37,11 @@ export class SearchController {
   @Get(':id')
   findOne(@CurrentTeam() teamId: string, @Param('id') id: string) {
     return this.service.findById(teamId, id);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  remove(@CurrentTeam() teamId: string, @Param('id') id: string) {
+    return this.service.remove(teamId, id);
   }
 }

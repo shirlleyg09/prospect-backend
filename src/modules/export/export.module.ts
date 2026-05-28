@@ -19,12 +19,14 @@ export class ExportController {
     @Query('temperature') temperature: string | undefined,
     @Query('niche') niche: string | undefined,
     @Query('minScore') minScore: string | undefined,
+    @Query('searchId') searchId: string | undefined,
     @Res() res: Response,
   ) {
     const result = await this.service.generateSync(teamId, format, {
       temperature,
       niche,
       minScore: minScore ? Number(minScore) : undefined,
+      searchId,
     });
 
     res.setHeader('Content-Type', result.contentType);

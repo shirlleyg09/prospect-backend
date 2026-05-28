@@ -67,6 +67,13 @@ export class SearchService {
     });
   }
 
+  async remove(teamId: string, id: string): Promise<void> {
+    const search = await this.prisma.search.findFirst({ where: { id, teamId } });
+    if (!search) throw new NotFoundException('Search não encontrada');
+    await this.prisma.search.delete({ where: { id } });
+    this.logger.log(`Search deletada id=${id} team=${teamId}`);
+  }
+
   async findById(teamId: string, id: string) {
     const search = await this.prisma.search.findFirst({
       where: { id, teamId },

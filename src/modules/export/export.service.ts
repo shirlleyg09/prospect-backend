@@ -20,6 +20,7 @@ export interface ExportFilters {
   temperature?: string;
   niche?: string;
   minScore?: number;
+  searchId?: string;
 }
 
 @Injectable()
@@ -40,6 +41,7 @@ export class ExportService {
     const leads = await this.prisma.lead.findMany({
       where: {
         teamId,
+        ...(filters.searchId && { searchId: filters.searchId }),
         ...(filters.temperature && { temperature: filters.temperature as any }),
         ...(filters.niche && { niche: { contains: filters.niche, mode: 'insensitive' } }),
         ...(filters.minScore !== undefined && { leadScore: { gte: filters.minScore } }),
