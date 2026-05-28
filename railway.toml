@@ -5,6 +5,9 @@ buildCommand = "npm ci && npm run prisma:generate && npx prisma migrate deploy -
 startCommand = "node dist/main.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+healthcheckPath = "/api/v1/auth/login"
+healthcheckTimeout = 30
 
 [variables]
 PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+PORT = "3000"
